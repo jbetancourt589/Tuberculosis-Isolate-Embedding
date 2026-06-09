@@ -18,6 +18,7 @@ env/
 # Local data and generated outputs
 Data/
 outputs/
+Outputs/
 Isolate Embedding Ouput/
 *.npy
 *.csv
