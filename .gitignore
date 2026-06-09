@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Virtual environments
+.venv/
+.venv*/
+venv/
+env/
+
+# IDE files
+.idea/
+.vscode/
+
+# Local data and generated outputs
+Data/
+outputs/
+Isolate Embedding Ouput/
+*.npy
+*.csv
+
+# OS files
+.DS_Store
+Thumbs.db
