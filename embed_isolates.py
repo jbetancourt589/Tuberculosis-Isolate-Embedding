@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import torch
 import numpy as np
 import pandas as pd
@@ -15,6 +16,7 @@ TARGETS_JSON = r"Data/cryptic_targets_all.json"
 OUTPUT_DIR = "outputs"
 EMBEDDINGS_OUT = os.path.join(OUTPUT_DIR, "isolate_embeddings.npy")
 METADATA_OUT = os.path.join(OUTPUT_DIR, "isolate_metadata.csv")
+READABLE_EMBEDDINGS_OUT = os.path.join(OUTPUT_DIR, "readable_embeddings.csv")
 
 MAX_LENGTH = 1000
 
@@ -35,9 +37,11 @@ print("Device:", device)
 with open(TARGETS_JSON, "r") as f:
     targets = json.load(f)
 
+
 def clean_sequence(seq):
     seq = str(seq).upper()
     return "".join(base for base in seq if base in "ACGTN")
+
 
 @torch.no_grad()
 def embed_sequence(sequence):
@@ -65,6 +69,7 @@ def embed_sequence(sequence):
     embedding = (last_hidden_state * attention_mask).sum(dim=1) / attention_mask.sum(dim=1)
 
     return embedding.squeeze().cpu().numpy()
+
 
 def embed_isolate(fasta_path):
     unit_embeddings = []
@@ -102,51 +107,90 @@ def embed_isolate(fasta_path):
     isolate_embedding = np.mean(unit_embeddings, axis=0)
 
     return isolate_embedding, len(unit_embeddings)
+
+
 fasta_files = [
     f for f in os.listdir(FASTA_DIR)
     if f.endswith(".fasta")
 ]
-#only works with the first 5 fasta files
+
+# Only works with the first 5 FASTA files for testing.
+# Remove or change this line when you are ready to run more.
 fasta_files = fasta_files[:5]
 
 print("FASTA files found:", len(fasta_files))
 
 all_embeddings = []
 metadata = []
+isolate_times = []
+skipped_count = 0
+
+total_start_time = time.time()
 
 for filename in tqdm(fasta_files):
+    isolate_start_time = time.time()
+
     isolate_id = filename.replace("_IR_Genes.fasta", "")
     fasta_path = os.path.join(FASTA_DIR, filename)
 
     if isolate_id not in targets:
         print(f"Skipping {isolate_id}: no target labels found")
+        skipped_count += 1
         continue
 
     isolate_embedding, gene_count = embed_isolate(fasta_path)
 
     if isolate_embedding is None:
         print(f"Skipping {isolate_id}: no valid gene embeddings")
+        skipped_count += 1
         continue
+
+    isolate_end_time = time.time()
+    isolate_runtime = isolate_end_time - isolate_start_time
+    isolate_times.append(isolate_runtime)
 
     all_embeddings.append(isolate_embedding)
 
     row = {
         "isolate_id": isolate_id,
         "filename": filename,
-        "num_gene_units_embedded": gene_count
+        "num_gene_units_embedded": gene_count,
+        "runtime_seconds": round(isolate_runtime, 3)
     }
 
     row.update(targets[isolate_id])
     metadata.append(row)
+
+total_end_time = time.time()
+total_runtime = total_end_time - total_start_time
+
+if len(all_embeddings) == 0:
+    raise ValueError("No embeddings were created. Check FASTA files and target labels.")
 
 embeddings_array = np.vstack(all_embeddings)
 metadata_df = pd.DataFrame(metadata)
 
 np.save(EMBEDDINGS_OUT, embeddings_array)
 metadata_df.to_csv(METADATA_OUT, index=False)
+embedding_columns = [f"dim_{i}" for i in range(embeddings_array.shape[1])]
+embeddings_df = pd.DataFrame(embeddings_array, columns=embedding_columns)
+
+readable_df = pd.concat([metadata_df[["isolate_id", "filename", "num_gene_units_embedded"]], embeddings_df], axis=1)
+
+readable_df.to_csv(READABLE_EMBEDDINGS_OUT, index=False)
+
+average_time = sum(isolate_times) / len(isolate_times)
 
 print("Done.")
 print("Embeddings saved to:", EMBEDDINGS_OUT)
+print("Readable embeddings CSV saved to:", READABLE_EMBEDDINGS_OUT)
 print("Metadata saved to:", METADATA_OUT)
 print("Embeddings shape:", embeddings_array.shape)
 print("Metadata shape:", metadata_df.shape)
+
+print("\nRuntime Metrics")
+print("Total runtime seconds:", round(total_runtime, 3))
+print("Total runtime minutes:", round(total_runtime / 60, 3))
+print("Average time per isolate seconds:", round(average_time, 3))
+print("Successfully embedded isolates:", len(all_embeddings))
+print("Skipped isolates:", skipped_count)
